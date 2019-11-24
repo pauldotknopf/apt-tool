@@ -91,16 +91,15 @@ namespace AptTool.Workspace.Impl
         
         public void Install()
         {
+            _logger.LogInformation("Updating the package cache...");
             _aptGetService.Update();
+            
             var image = GetImage();
   
-            _logger.LogInformation("Looking for all the required/essential packages.");
-            
             _logger.LogInformation("Getting all package names...");
             var packageNames = _aptCacheService.Packages();
 
-            _logger.LogInformation("Getting the canidate version for each package...");
-            
+            _logger.LogInformation("Looking for all the essential/required/important packages...");
             var policies = _aptCacheService.Policy(packageNames);
             var packageInfos = _aptCacheService.Show(packageNames.ToDictionary(x => x,
                     x => new AptVersion(policies[x].CandidateVersion, null)));
@@ -119,11 +118,13 @@ namespace AptTool.Workspace.Impl
 
                 if (packageInfo.Priority == "required")
                 {
+                    _logger.LogInformation("Adding required package: {package}", packageName);
                     packages.Add(packageName, AptVersion.Unspecified);
                 } else if (packageInfo.Priority == "important")
                 {
                     if (!image.ExcludeImportant)
                     {
+                        _logger.LogInformation("Adding important package: {package}", packageName);
                         packages.Add(packageName, AptVersion.Unspecified);
                     }
                 }
@@ -163,25 +164,57 @@ namespace AptTool.Workspace.Impl
                 }
             }
             
+            _logger.LogInformation("Declared packages:");
+            foreach (var package in packages)
+            {
+                if (package.Value.Equals(AptVersion.Unspecified))
+                {
+                    _logger.LogInformation($"\t{package.Key}:latest", package.Key, "latest");
+                }
+                else
+                {
+                    _logger.LogInformation($"\t{package.Value.ToCommandParameter(package.Key)}");
+                }
+            }
+            
+            _logger.LogInformation("Calculating all the packages that need to be installed...");
             var packagesToInstall = _aptGetService.SimulateInstall(packages);
             
+            _logger.LogInformation("Resolved packages:");
+            foreach (var packageToInstall in packagesToInstall)
+            {
+                _logger.LogInformation($"\t{packageToInstall.Value.ToCommandParameter(packageToInstall.Key)}");
+            }
+            
+            _logger.LogInformation("Saving image-lock.json...");
             var lockFile = Path.Combine(_workspaceConfig.RootDirectory, "image-lock.json");
             if (File.Exists(lockFile))
             {
                 File.Delete(lockFile);
             }
-            
             File.WriteAllText(lockFile, JsonConvert.SerializeObject(new ImageLock
             {
                 InstalledPackages = packagesToInstall
             }, _jsonSerializerSettings));
+            
+            _logger.LogInformation("Done!");
         }
 
-        public void GenerateRootFs(string directory, bool overwrite)
+        public void GenerateRootFs(string directory, bool overwrite, bool runStage2)
         {
             if (!Env.IsRoot)
             {
                 _logger.LogWarning("The currently running user is not root. Some commands will be run with sudo.");
+            }
+
+            if (runStage2)
+            {
+                // Let's make sure arch-chroot is available.
+                if (!File.Exists("/usr/bin/arch-chroot"))
+                {
+                    _logger.LogError($"You indicated you wanted to run stage2, but arch-chroot isn't available. Try running {"sudo apt-get install arch-install-scripts".Quoted()}.");
+                    throw new Exception("The command arch-chroot isn't available.");
+                }
             }
 
             var image = GetImage();
@@ -189,6 +222,7 @@ namespace AptTool.Workspace.Impl
 
             var preseedFiles = (image.Preseeds ?? new List<string>()).Select(x =>
             {
+                _logger.LogInformation("Including preseed file: {file}", x);
                 var path = x;
                 if (!Path.IsPathRooted(path))
                 {
@@ -217,20 +251,23 @@ namespace AptTool.Workspace.Impl
             directory = Path.GetFullPath(directory);
             
             _logger.LogInformation("Generating rootfs at {directory}.", directory);
-
+            
+            _logger.LogInformation("Cleaning directory...");
             if (overwrite)
             {
                 if (Directory.Exists(directory))
                 {
-                    _processRunner.RunShell($"{(Env.IsRoot ? "" : "sudo ")}rm -rf \"{directory}\"", new RunnerOptions{ PrintCommand = false });
+                    _logger.LogInformation("Directory exists, removing...");
+                    _processRunner.RunShell($"rm -rf {directory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
                 }
-                _processRunner.RunShell($"{(Env.IsRoot ? "" : "sudo ")}mkdir \"{directory}\"", new RunnerOptions { PrintCommand = false });
+                _processRunner.RunShell($"mkdir {directory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
             }
             else
             {
                 if (!Directory.Exists(directory))
                 {
-                    _processRunner.RunShell($"{(Env.IsRoot ? "" : "sudo ")}mkdir \"{directory}\"", new RunnerOptions { PrintCommand = false });
+                    _logger.LogInformation("Creating directory..");
+                    _processRunner.RunShell($"mkdir {directory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
                 }
                 else
                 {
@@ -242,6 +279,7 @@ namespace AptTool.Workspace.Impl
                 }
             }
             
+            _logger.LogInformation("Creating required folders/files...");
             _processRunner.RunShell("mkdir -p \"var/lib/dpkg/info\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory});
             _processRunner.RunShell("touch \"var/lib/dpkg/status\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
             _processRunner.RunShell("mkdir -p \"var/lib/dpkg/updates\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
@@ -250,6 +288,7 @@ namespace AptTool.Workspace.Impl
             _processRunner.RunShell("mkdir -p \"stage2/debs\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
             _processRunner.RunShell("mkdir -p \"stage2/preseeds\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
 
+            _logger.LogInformation("Including apt repositories...");
             foreach (var line in File.ReadLines(Path.Combine(_aptDirectoryPrepService.AptDirectory,
                 "etc/apt/sources.list")))
             {
@@ -257,9 +296,9 @@ namespace AptTool.Workspace.Impl
             }
             
             // Download the packages.
+            _logger.LogInformation("Downloading the debs...");
             var debFolder = Path.Combine(_workspaceConfig.RootDirectory, ".debs");
-            
-            _logger.LogInformation("Downloading all the required debs to create rootfs...");
+            debFolder.EnsureDirectoryExists();
             _aptGetService.Download(imageLock.InstalledPackages, debFolder);
 
             // Debs will go in here to reinstall in stage 2.
@@ -291,6 +330,8 @@ namespace AptTool.Workspace.Impl
                     throw new Exception($"The deb file {debFile} doesn't exist.");
                 }
                 
+                _logger.LogInformation("Extracting: {package}", imageLock.InstalledPackages[package].ToCommandParameter(package));
+                
                 // Step 2, we extract the entire contents of the of the deb package.
                 // This won't actually configure the package as installed, but it
                 // will at least allow out chroot to execute commands (dpkg, etc).
@@ -305,11 +346,15 @@ namespace AptTool.Workspace.Impl
             
             // Step 4, within the stage2, now we configure all the packages that we have unpacked.
             stage2Script.AppendLine("dpkg --configure -a");
-            
-            stage2Script.Append("echo \"DONE! Don't forget to delete /stage2\"");
 
+            if (!runStage2) // Done put this message if we will be deleting this ourselves.
+            {
+                stage2Script.Append("echo \"DONE! Don't forget to delete /stage2!!\"");
+            }
+
+            _logger.LogInformation("Saving stage2 script to be run via chroot: {script}", "/stage2/stage2.sh");
+            
             var stage2ScriptPath = Path.Combine(directory, "stage2", "stage2.sh");
-            _logger.LogInformation("Saving stage2 script to be run via chroot: {script}", stage2ScriptPath);
             var tempPath = Path.GetTempFileName();
             try
             {
@@ -320,116 +365,17 @@ namespace AptTool.Workspace.Impl
             {
                 File.Delete(tempPath);
             }
+            
             _processRunner.RunShell($"chmod +x {stage2ScriptPath}", new RunnerOptions{ UseSudo = !Env.IsRoot });
-        }
 
-        private List<string> GetDependencies(Dictionary<string, AptVersion> installedPackages,
-            Dictionary<string, Dictionary<AptVersion, DebPackageInfo>> packageInfo,
-            List<PackageDependency> dependencies)
-        {
-            var result = new List<string>();
-            foreach (var dependency in dependencies)
+            if (runStage2)
             {
-                if (dependency is PackageDependencySpecific packageDependencySpecific)
-                {
-                    if (!installedPackages.ContainsKey(packageDependencySpecific.Package))
-                    {
-                        // May be provided virtually by another package.
-                        var found = false;
-                        
-                        foreach (var installedPackage in installedPackages)
-                        {
-                            var info = packageInfo[installedPackage.Key][installedPackage.Value];
-                            if (info.Provides != null &&
-                                info.Provides.Any(x => x.SatisfiedBy(packageDependencySpecific.Package)))
-                            {
-                                result.Add(installedPackage.Key);
-                                found = true;
-                                break;
-                            }
-                        }
-
-                        if (!found)
-                        {
-                            throw new InvalidOperationException();
-                        }
-                    }
-                    else
-                    {
-                        result.Add(packageDependencySpecific.Package);
-                    }
-                }
-                else if (dependency is PackageDependencyAlternates packageDependencyAlternates)
-                {
-                    foreach (var alternate in packageDependencyAlternates.Packages)
-                    {
-                        if (!installedPackages.ContainsKey(alternate))
-                        {
-                            // May be provided virtually by another package.
-                            foreach (var installedPackage in installedPackages)
-                            {
-                                var info = packageInfo[installedPackage.Key][installedPackage.Value];
-                                if (info.Provides != null &&
-                                    info.Provides.Any(x => x.SatisfiedBy(alternate)))
-                                {
-                                    result.Add(installedPackage.Key);
-                                    break;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            result.Add(alternate);
-                        }
-                    }
-                }
-                else
-                {
-                    throw new NotSupportedException();
-                }
+                _logger.LogInformation("Running stage2...");
+                _processRunner.RunShell($"arch-chroot {directory.Quoted()} /stage2/stage2.sh", new RunnerOptions{ UseSudo = !Env.IsRoot });
+                _processRunner.RunShell($"rm -r {Path.Combine(directory, "stage2").Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
             }
-
-            return result;
-        }
-        
-        private IEnumerable<T> TopologicalSequenceDFS<T>(IEnumerable<T> source, Func<T, IEnumerable<T>> deps)
-        {
-            HashSet<T> yielded = new HashSet<T>();
-            HashSet<T> visited = new HashSet<T>();
-            Stack<Tuple<T, IEnumerator<T>>> stack = new Stack<Tuple<T, IEnumerator<T>>>();
-
-            foreach (T t in source)
-            {
-                stack.Clear();
-                if (visited.Add(t))
-                    stack.Push(new Tuple<T, IEnumerator<T>>(t, deps(t).GetEnumerator()));
-
-                while (stack.Count > 0)
-                {
-                    var p = stack.Peek();
-                    bool depPushed = false;
-                    while (p.Item2.MoveNext())
-                    {
-                        var curr = p.Item2.Current;
-                        if (visited.Add(curr))
-                        {
-                            stack.Push(new Tuple<T, IEnumerator<T>>(curr, deps(curr).GetEnumerator()));
-                            depPushed = true;
-                            break;
-                        }
-                        else if (!yielded.Contains(curr))
-                            throw new Exception("cycle");
-                    }
-
-                    if (!depPushed)
-                    {
-                        p = stack.Pop();
-                        if (!yielded.Add(p.Item1))
-                            throw new Exception("bug");
-                        yield return p.Item1;
-                    }
-                }
-            }
+            
+            _logger.LogInformation("Done!");
         }
     }
 }

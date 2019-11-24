@@ -8,14 +8,15 @@ namespace AptTool.Commands
     public class Install
     {
         [Verb("install")]
-        public class Command
+        public class Command : Program.CommonOptions
         {
             
         }
 
-        public static int Run(IServiceProvider serviceProvider, Command command)
+        public static int Run(Command command)
         {
-            var workspace = serviceProvider.GetRequiredService<IWorkspace>();
+            var sp = Program.BuildServiceProvider(command);
+            var workspace = sp.GetRequiredService<IWorkspace>();
             
             workspace.Init();
             workspace.Install();

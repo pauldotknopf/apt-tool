@@ -21,11 +21,6 @@ namespace AptTool.Process.Impl
             {
                 runnerOptions = new RunnerOptions();
             }
-            
-            if (runnerOptions.PrintCommand)
-            {
-                _logger.LogInformation("Running: {command}", command);
-            }
 
             var workingDirectory = runnerOptions.WorkingDirectory;
             if (string.IsNullOrEmpty(workingDirectory))
@@ -74,11 +69,6 @@ namespace AptTool.Process.Impl
                 runnerOptions = new RunnerOptions();
             }
             
-            if (runnerOptions.PrintCommand)
-            {
-                _logger.LogInformation("Running: {command}", command);
-            }
-
             var workingDirectory = runnerOptions.WorkingDirectory;
             if (string.IsNullOrEmpty(workingDirectory))
             {

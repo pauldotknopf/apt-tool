@@ -15,6 +15,6 @@ namespace AptTool.Workspace
 
         void Install();
 
-        void GenerateRootFs(string directory, bool overwrite);
+        void GenerateRootFs(string directory, bool overwrite, bool runStage2);
     }
 }
