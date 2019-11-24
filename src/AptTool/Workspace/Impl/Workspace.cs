@@ -64,7 +64,13 @@ namespace AptTool.Workspace.Impl
                 throw new Exception("The file repositories.json doesn't exist.");
             }
 
-            return JsonConvert.DeserializeObject<List<AptRepo>>(File.ReadAllText(file), _jsonSerializerSettings);
+            var result = JsonConvert.DeserializeObject<List<AptRepo>>(File.ReadAllText(file), _jsonSerializerSettings);
+            if (result.Count == 0)
+            {
+                throw new Exception("You must provide at least 1 repository.");
+            }
+
+            return result;
         }
         
         public Image GetImage()
@@ -194,7 +200,8 @@ namespace AptTool.Workspace.Impl
             }
             File.WriteAllText(lockFile, JsonConvert.SerializeObject(new ImageLock
             {
-                InstalledPackages = packagesToInstall
+                InstalledPackages = packagesToInstall,
+                Repositories = GetRepositories()
             }, _jsonSerializerSettings));
             
             _logger.LogInformation("Done!");
@@ -289,10 +296,10 @@ namespace AptTool.Workspace.Impl
             _processRunner.RunShell("mkdir -p \"stage2/preseeds\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
 
             _logger.LogInformation("Including apt repositories...");
-            foreach (var line in File.ReadLines(Path.Combine(_aptDirectoryPrepService.AptDirectory,
-                "etc/apt/sources.list")))
+            foreach (var repo in imageLock.Repositories)
             {
-                _processRunner.RunShell($"echo \"{line}\" | tee -a ./etc/apt/sources.list", new RunnerOptions{UseSudo = !Env.IsRoot, WorkingDirectory = directory});
+                _processRunner.RunShell($"echo {repo.ToString().Quoted()} | tee -a ./etc/apt/sources.list",
+                    new RunnerOptions {UseSudo = !Env.IsRoot, WorkingDirectory = directory});
             }
             
             // Download the packages.
