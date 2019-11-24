@@ -1,0 +1,6 @@
+{
+    "packages": {
+        "@github/time-elements": "^3.0.8",
+        "@types/jquery": "^3.3.31"
+    }
+}

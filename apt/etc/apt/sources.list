@@ -1,0 +1,5 @@
+deb http://deb.debian.org/debian buster main
+deb http://security.debian.org/debian-security buster/updates main
+deb http://deb.debian.org/debian buster-updates main
+deb https://raw.githubusercontent.com/godarch/debian-repo/master/darch testing main
+deb https://download.docker.com/linux/debian buster stable

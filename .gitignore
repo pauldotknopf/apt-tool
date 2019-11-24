@@ -355,4 +355,7 @@ MigrationBackup/
 
 # End of https://www.gitignore.io/api/csharp
 .idea/
-apt/state/
+apt/
+.apt/
+work/.debs/
+work/rootfs/
