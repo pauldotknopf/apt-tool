@@ -6,7 +6,5 @@ namespace AptTool.Workspace
     public class ImageLock
     {
         public Dictionary<string, AptVersion> InstalledPackages { get; set; }
-        
-        public List<AptRepo> Repositories { get; set; }
     }
 }

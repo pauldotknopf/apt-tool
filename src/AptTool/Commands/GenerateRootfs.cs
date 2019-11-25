@@ -7,16 +7,16 @@ namespace AptTool.Commands
 {
     public class GenerateRootFs
     {
-        [Verb("generate-rootfs")]
+        [Verb("generate-rootfs", HelpText = "Generate the rootfs.")]
         public class Command : Program.CommonOptions
         {
-            [Option('d', "directory")]
+            [Option('d', "directory", HelpText = "The directory to generate the rootfs to.")]
             public string Directory { get; set; }
             
-            [Option('w', "overwrite")]
+            [Option('w', "overwrite", HelpText = "Should we ignore (delete) any data that may already be present?")]
             public bool OverWrite { get; set; }
             
-            [Option('r', "run-stage2")]
+            [Option('r', "run-stage2", HelpText = "Should we automatically chroot into the rootfs to run the stage2 scripts?")]
             public bool RunStage2 { get; set; }
         }
 

@@ -7,7 +7,7 @@ namespace AptTool.Commands
 {
     public class Install
     {
-        [Verb("install")]
+        [Verb("install", HelpText = "Regenerate the image-lock.json, based on the image.json and repositories.json files.")]
         public class Command : Program.CommonOptions
         {
             

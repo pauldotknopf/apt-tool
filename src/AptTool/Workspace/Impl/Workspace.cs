@@ -53,26 +53,10 @@ namespace AptTool.Workspace.Impl
         
         public void Init()
         {
-            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory, GetRepositories());
+            var image = GetImage();
+            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory, image.Repositories);
         }
 
-        public List<AptRepo> GetRepositories()
-        {
-            var file = Path.Combine(_workspaceConfig.RootDirectory, "repositories.json");
-            if (!File.Exists(file))
-            {
-                throw new Exception("The file repositories.json doesn't exist.");
-            }
-
-            var result = JsonConvert.DeserializeObject<List<AptRepo>>(File.ReadAllText(file), _jsonSerializerSettings);
-            if (result.Count == 0)
-            {
-                throw new Exception("You must provide at least 1 repository.");
-            }
-
-            return result;
-        }
-        
         public Image GetImage()
         {
             var imageFile = Path.Combine(_workspaceConfig.RootDirectory, "image.json");
@@ -81,7 +65,14 @@ namespace AptTool.Workspace.Impl
                 throw new Exception("The file image.json doesn't exist.");
             }
 
-            return JsonConvert.DeserializeObject<Image>(File.ReadAllText(imageFile), _jsonSerializerSettings);
+            var result = JsonConvert.DeserializeObject<Image>(File.ReadAllText(imageFile), _jsonSerializerSettings);
+
+            if (result.Repositories == null || result.Repositories.Count == 0)
+            {
+                throw new Exception("You must provide at least one repository.");
+            }
+
+            return result;
         }
 
         public ImageLock GetImageLock()
@@ -200,8 +191,7 @@ namespace AptTool.Workspace.Impl
             }
             File.WriteAllText(lockFile, JsonConvert.SerializeObject(new ImageLock
             {
-                InstalledPackages = packagesToInstall,
-                Repositories = GetRepositories()
+                InstalledPackages = packagesToInstall
             }, _jsonSerializerSettings));
             
             _logger.LogInformation("Done!");
@@ -288,6 +278,7 @@ namespace AptTool.Workspace.Impl
             
             _logger.LogInformation("Creating required folders/files...");
             _processRunner.RunShell("mkdir -p \"var/lib/dpkg/info\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory});
+            _processRunner.RunShell("touch \"var/lib/dpkg/available\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
             _processRunner.RunShell("touch \"var/lib/dpkg/status\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
             _processRunner.RunShell("mkdir -p \"var/lib/dpkg/updates\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
             _processRunner.RunShell("mkdir -p \"etc/apt\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
@@ -296,7 +287,7 @@ namespace AptTool.Workspace.Impl
             _processRunner.RunShell("mkdir -p \"stage2/preseeds\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
 
             _logger.LogInformation("Including apt repositories...");
-            foreach (var repo in imageLock.Repositories)
+            foreach (var repo in image.Repositories)
             {
                 _processRunner.RunShell($"echo {repo.ToString().Quoted()} | tee -a ./etc/apt/sources.list",
                     new RunnerOptions {UseSudo = !Env.IsRoot, WorkingDirectory = directory});

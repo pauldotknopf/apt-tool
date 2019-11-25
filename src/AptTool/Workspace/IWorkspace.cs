@@ -7,8 +7,6 @@ namespace AptTool.Workspace
     {
         void Init();
 
-        List<AptRepo> GetRepositories();
-
         Image GetImage();
 
         ImageLock GetImageLock();

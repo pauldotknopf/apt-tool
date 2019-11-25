@@ -58,6 +58,7 @@ namespace AptTool.Process.Impl
 
             if (process.ExitCode != 0)
             {
+                _logger.LogError("Error executing command: {command}", command);
                 throw new Exception($"Exit code: {process.ExitCode}");
             }
         }
@@ -108,6 +109,8 @@ namespace AptTool.Process.Impl
             
             if (process.ExitCode != 0)
             {
+                _logger.LogError("Error executing command: {command}", command);
+                _logger.LogError("Command output: {output}", output);
                 throw new Exception($"Exit code: {process.ExitCode}");
             }
 

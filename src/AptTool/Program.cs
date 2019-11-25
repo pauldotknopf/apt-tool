@@ -15,17 +15,19 @@ namespace AptTool
     {
         public class CommonOptions
         {
-            [Option('v', "verbose", Required = false)]
+            [Option('v', "verbose", Required = false, HelpText = "Display some useful information, for debugging purposes.")]
             public bool Verbose { get; set; }
         }
  
         static int Main(string[] args)
         {
             return Parser.Default.ParseArguments<Commands.Install.Command,
-                    Commands.GenerateRootFs.Command>(args)
+                    Commands.GenerateRootFs.Command,
+                    Commands.Man.Command>(args)
                 .MapResult(
                     (Commands.Install.Command opts) => Commands.Install.Run(opts),
                     (Commands.GenerateRootFs.Command opts) => Commands.GenerateRootFs.Run(opts),
+                    (Commands.Man.Command opts) => Commands.Man.Run(opts),
                     errs => 1);
         }
 
