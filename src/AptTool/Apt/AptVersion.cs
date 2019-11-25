@@ -54,7 +54,7 @@ namespace AptTool.Apt
             
             if (!string.IsNullOrEmpty(packageName))
             {
-                result = $" {packageName}";
+                result = $"{packageName}";
             }
 
             if (!string.IsNullOrEmpty(Architecture))

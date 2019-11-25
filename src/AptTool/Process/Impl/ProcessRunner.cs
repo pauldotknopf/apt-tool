@@ -21,11 +21,6 @@ namespace AptTool.Process.Impl
             {
                 runnerOptions = new RunnerOptions();
             }
-            
-            if (runnerOptions.PrintCommand)
-            {
-                _logger.LogInformation("Running: {command}", command);
-            }
 
             var workingDirectory = runnerOptions.WorkingDirectory;
             if (string.IsNullOrEmpty(workingDirectory))
@@ -63,6 +58,7 @@ namespace AptTool.Process.Impl
 
             if (process.ExitCode != 0)
             {
+                _logger.LogError("Error executing command: {command}", command);
                 throw new Exception($"Exit code: {process.ExitCode}");
             }
         }
@@ -74,11 +70,6 @@ namespace AptTool.Process.Impl
                 runnerOptions = new RunnerOptions();
             }
             
-            if (runnerOptions.PrintCommand)
-            {
-                _logger.LogInformation("Running: {command}", command);
-            }
-
             var workingDirectory = runnerOptions.WorkingDirectory;
             if (string.IsNullOrEmpty(workingDirectory))
             {
@@ -118,6 +109,8 @@ namespace AptTool.Process.Impl
             
             if (process.ExitCode != 0)
             {
+                _logger.LogError("Error executing command: {command}", command);
+                _logger.LogError("Command output: {output}", output);
                 throw new Exception($"Exit code: {process.ExitCode}");
             }
 

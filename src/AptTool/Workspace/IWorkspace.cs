@@ -7,14 +7,12 @@ namespace AptTool.Workspace
     {
         void Init();
 
-        List<AptRepo> GetRepositories();
-
         Image GetImage();
 
         ImageLock GetImageLock();
 
         void Install();
 
-        void GenerateRootFs(string directory, bool overwrite);
+        void GenerateRootFs(string directory, bool overwrite, bool runStage2);
     }
 }

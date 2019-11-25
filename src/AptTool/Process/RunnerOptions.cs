@@ -4,13 +4,6 @@ namespace AptTool.Process
 {
     public class RunnerOptions
     {
-        public RunnerOptions()
-        {
-            PrintCommand = true;
-        }
-        
-        public bool PrintCommand { get; set; }
-        
         public bool UseSudo { get; set; }
         
         public Dictionary<string, string> Env { get; set; }

@@ -1,3 +1,11 @@
 <Project>
     <Import Project="version.props" />
+    <PropertyGroup>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <Authors>pauldotknopf</Authors>
+        <PackageDescription>A tool for working with apt repos and building root filesystems.</PackageDescription>
+        <Summary>A tool for working with apt repos and building root filesystems.</Summary>
+        <RepositoryUrl>https://github.com/pauldotknopf/apt-tool</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/pauldotknopf/apt-tool</PackageProjectUrl>
+    </PropertyGroup>
 </Project>
