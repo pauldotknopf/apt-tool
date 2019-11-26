@@ -204,6 +204,9 @@ namespace AptTool.Workspace.Impl
                 _logger.LogWarning("The currently running user is not root. Some commands will be run with sudo.");
             }
 
+            _logger.LogInformation("Updating the package cache...");
+            _aptGetService.Update();
+            
             if (runStage2)
             {
                 // Let's make sure arch-chroot is available.
