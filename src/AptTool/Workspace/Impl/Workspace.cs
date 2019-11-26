@@ -234,6 +234,43 @@ namespace AptTool.Workspace.Impl
 
                 return path;
             }).ToList();
+
+            var scripts = (image.Scripts ?? new List<InstallScript>()).Select(x =>
+            {
+                if (string.IsNullOrEmpty(x.Name))
+                {
+                    throw new Exception("You must provide a script name.");
+                }
+
+                if (string.IsNullOrEmpty(x.Directory))
+                {
+                    throw new Exception("You must provide a script directory.");
+                }
+
+                _logger.LogInformation("Including script: {@script}", x);
+
+                var path = x.Directory;
+                if (!Path.IsPathRooted(path))
+                {
+                    path = Path.Combine(_workspaceConfig.RootDirectory, path);
+                }
+
+                path = Path.GetFullPath(path);
+                if (!Directory.Exists(path))
+                {
+                    throw new Exception($"The script directory {x.Directory} doesn't exist.");
+                }
+
+                x.Directory = path;
+                
+                var scriptPath = $"{x.Directory}{Path.DirectorySeparatorChar}{x.Name}";
+                if (!File.Exists(scriptPath))
+                {
+                    throw new Exception($"The install script {x.Name} doesn't exist.");
+                }
+                
+                return x;
+            }).ToList();
             
             if (string.IsNullOrEmpty(directory))
             {
@@ -350,6 +387,26 @@ namespace AptTool.Workspace.Impl
                 stage2Script.Append("echo \"DONE! Don't forget to delete /stage2!!\"");
             }
 
+            if (scripts.Count >= 0)
+            {
+                _logger.LogInformation("Including the custom scripts in the stage2...");
+                var destinationDirectory = Path.Combine(directory, "stage2", "scripts");
+                _processRunner.RunShell($"mkdir -p {destinationDirectory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+
+                foreach (var scriptLookup in scripts.ToLookup(x => x.Directory))
+                {
+                    var destinationScriptDirectoryName = $"{Path.GetFileName(scriptLookup.Key)}-{Guid.NewGuid().ToString().Replace("-", "")}";
+                    var destinationScriptDirectory = Path.Combine(directory, "stage2", "scripts", destinationScriptDirectoryName);
+                    _processRunner.RunShell($"rsync -a {scriptLookup.Key}/* {destinationScriptDirectory}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+
+                    foreach (var script in scriptLookup)
+                    {
+                        stage2Script.AppendLine(
+                            $"bash -c \"cd /stage2/scripts/{destinationScriptDirectoryName} && ./{script.Name}\"");
+                    }
+                }
+            }
+            
             _logger.LogInformation("Saving stage2 script to be run via chroot: {script}", "/stage2/stage2.sh");
             
             var stage2ScriptPath = Path.Combine(directory, "stage2", "stage2.sh");
