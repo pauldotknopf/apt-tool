@@ -399,8 +399,9 @@ namespace AptTool.Workspace.Impl
                 foreach (var scriptLookup in scripts.ToLookup(x => x.Directory))
                 {
                     var destinationScriptDirectoryName = $"{Path.GetFileName(scriptLookup.Key)}-{Guid.NewGuid().ToString().Replace("-", "")}";
-                    var destinationScriptDirectory = Path.Combine(directory, "stage2", "scripts", destinationScriptDirectoryName);
-                    _processRunner.RunShell($"rsync -a {scriptLookup.Key}/* {destinationScriptDirectory}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+                    var destinationScriptDirectory = Path.Combine(destinationDirectory, destinationScriptDirectoryName);
+                    _processRunner.RunShell($"mkdir {destinationScriptDirectory}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+                    _processRunner.RunShell($"cp -ra {scriptLookup.Key}/* {destinationScriptDirectory}/", new RunnerOptions{ UseSudo = !Env.IsRoot });
 
                     foreach (var script in scriptLookup)
                     {
