@@ -12,5 +12,7 @@ namespace AptTool.Workspace
         public Dictionary<string, string> Packages { get; set; }
         
         public List<string> Preseeds { get; set; }
+        
+        public List<InstallScript> Scripts { get; set; }
     }
 }

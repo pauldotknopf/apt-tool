@@ -8,6 +8,12 @@ This tool is helpful to create rootfs for debian-based distributions with reprod
 dotnet tool install --global AptTool
 ```
 
+This tool needs to be run as root (generate-rootfs), so it is recommended to install it into the system path.
+
+```
+sudo dotnet tool install AptTool --tool-path /usr/local/bin/
+```
+
 # General
 
 The idea is similar to what you see with the Node package manager (npm). An "image.json" file is used to generate a "image-lock.json" file, which is then use to build a rootfs.
