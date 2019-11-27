@@ -23,10 +23,12 @@ namespace AptTool
         {
             return Parser.Default.ParseArguments<Commands.Install.Command,
                     Commands.GenerateRootFs.Command,
+                    Commands.GenerateScripts.Command,
                     Commands.Man.Command>(args)
                 .MapResult(
                     (Commands.Install.Command opts) => Commands.Install.Run(opts),
                     (Commands.GenerateRootFs.Command opts) => Commands.GenerateRootFs.Run(opts),
+                    (Commands.GenerateScripts.Command opts) => Commands.GenerateScripts.Run(opts),
                     (Commands.Man.Command opts) => Commands.Man.Run(opts),
                     errs => 1);
         }
