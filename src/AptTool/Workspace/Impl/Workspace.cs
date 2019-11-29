@@ -220,60 +220,8 @@ namespace AptTool.Workspace.Impl
             var image = GetImage();
             var imageLock = GetImageLock();
 
-            var preseedFiles = (image.Preseeds ?? new List<string>()).Select(x =>
-            {
-                _logger.LogInformation("Including preseed file: {file}", x);
-                var path = x;
-                if (!Path.IsPathRooted(path))
-                {
-                    path = Path.Combine(_workspaceConfig.RootDirectory, path);
-                }
-
-                path = Path.GetFullPath(path);
-                if (!File.Exists(path))
-                {
-                    throw new Exception($"The preseed file {x} doesn.t exist.");
-                }
-
-                return path;
-            }).ToList();
-
-            var scripts = (image.Scripts ?? new List<InstallScript>()).Select(x =>
-            {
-                if (string.IsNullOrEmpty(x.Name))
-                {
-                    throw new Exception("You must provide a script name.");
-                }
-
-                if (string.IsNullOrEmpty(x.Directory))
-                {
-                    throw new Exception("You must provide a script directory.");
-                }
-
-                _logger.LogInformation("Including script: {@script}", x);
-
-                var path = x.Directory;
-                if (!Path.IsPathRooted(path))
-                {
-                    path = Path.Combine(_workspaceConfig.RootDirectory, path);
-                }
-
-                path = Path.GetFullPath(path);
-                if (!Directory.Exists(path))
-                {
-                    throw new Exception($"The script directory {x.Directory} doesn't exist.");
-                }
-
-                x.Directory = path;
-                
-                var scriptPath = $"{x.Directory}{Path.DirectorySeparatorChar}{x.Name}";
-                if (!File.Exists(scriptPath))
-                {
-                    throw new Exception($"The install script {x.Name} doesn't exist.");
-                }
-                
-                return x;
-            }).ToList();
+            var preseedFiles = GetPreseeds(image);
+            var scripts = GetScripts(image);
             
             if (string.IsNullOrEmpty(directory))
             {
@@ -435,6 +383,171 @@ namespace AptTool.Workspace.Impl
             }
             
             _logger.LogInformation("Done!");
+        }
+
+        public void GenerateScripts(string directory, bool runScripts)
+        {
+            if (!Env.IsRoot)
+            {
+                _logger.LogWarning("The currently running user is not root. Some commands will be run with sudo.");
+            }
+
+            if (runScripts)
+            {
+                // Let's make sure arch-chroot is available.
+                if (!File.Exists("/usr/bin/arch-chroot"))
+                {
+                    _logger.LogError($"You indicated you wanted to run scripts, but arch-chroot isn't available. Try running {"sudo apt-get install arch-install-scripts".Quoted()}.");
+                    throw new Exception("The command arch-chroot isn't available.");
+                }
+            }
+
+            var image = GetImage();
+            var scripts = GetScripts(image);
+
+            if (scripts.Count == 0)
+            {
+                throw new Exception("There are no scripts to install and run.");
+            }
+            
+            if (string.IsNullOrEmpty(directory))
+            {
+                directory = "rootfs";
+            }
+
+            if (!Path.IsPathRooted(directory))
+            {
+                directory = Path.Combine(Directory.GetCurrentDirectory(), directory);
+            }
+
+            directory = Path.GetFullPath(directory);
+
+            var scriptsDirectory = Path.Combine(directory, "scripts");
+            
+            _logger.LogInformation("Installing scripts to {scripts}.", scriptsDirectory);
+        
+            if (Directory.Exists(scriptsDirectory))
+            {
+                _logger.LogInformation("Directory exists, removing...");
+                _processRunner.RunShell($"rm -rf {scriptsDirectory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+            }
+            _processRunner.RunShell($"mkdir -p {scriptsDirectory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+            
+            var runScript = new StringBuilder();
+            runScript.AppendLine("#!/bin/sh");
+            runScript.AppendLine("set -e");
+            runScript.AppendLine("export DEBIAN_FRONTEND=noninteractive");
+            runScript.AppendLine("export DEBCONF_NONINTERACTIVE_SEEN=true ");
+            runScript.AppendLine("export LC_ALL=C");
+            runScript.AppendLine("export LANGUAGE=C");
+            runScript.AppendLine("export LANG=C");
+            
+            if (!runScripts) // Done put this message if we will be deleting this ourselves.
+            {
+                runScript.Append("echo \"DONE! Don't forget to delete /scripts!!\"");
+            }
+
+            _logger.LogInformation("Including the custom scripts...");
+
+            foreach (var scriptLookup in scripts.ToLookup(x => x.Directory))
+            {
+                var destinationScriptDirectoryName = $"{Path.GetFileName(scriptLookup.Key)}-{Guid.NewGuid().ToString().Replace("-", "")}";
+                var destinationScriptDirectory = Path.Combine(scriptsDirectory, destinationScriptDirectoryName);
+                _processRunner.RunShell($"mkdir {destinationScriptDirectory}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+                _processRunner.RunShell($"cp -ra {scriptLookup.Key}/* {destinationScriptDirectory}/", new RunnerOptions{ UseSudo = !Env.IsRoot });
+
+                foreach (var script in scriptLookup)
+                {
+                    runScript.AppendLine(
+                        $"bash -c \"cd /scripts/{destinationScriptDirectoryName} && ./{script.Name}\"");
+                }
+            }
+            
+            _logger.LogInformation("Saving script to be run via chroot: {script}", "/scripts/scripts.sh");
+            
+            var scriptPath = Path.Combine(scriptsDirectory, "scripts.sh");
+            var tempPath = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(tempPath, runScript.ToString());
+                _processRunner.RunShell($"cp \"{tempPath}\" \"{scriptPath}\"", new RunnerOptions{ UseSudo = !Env.IsRoot });
+            }
+            finally
+            {
+                File.Delete(tempPath);
+            }
+            
+            _processRunner.RunShell($"chmod +x {scriptPath}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+
+            if (runScripts)
+            {
+                _logger.LogInformation("Running scripts...");
+                _processRunner.RunShell($"arch-chroot {directory.Quoted()} /scripts/scripts.sh", new RunnerOptions{ UseSudo = !Env.IsRoot });
+                _processRunner.RunShell($"rm -r {scriptsDirectory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
+            }
+            
+            _logger.LogInformation("Done!");
+        }
+
+        private List<InstallScript> GetScripts(Image image)
+        {
+            return (image.Scripts ?? new List<InstallScript>()).Select(x =>
+            {
+                if (string.IsNullOrEmpty(x.Name))
+                {
+                    throw new Exception("You must provide a script name.");
+                }
+
+                if (string.IsNullOrEmpty(x.Directory))
+                {
+                    throw new Exception("You must provide a script directory.");
+                }
+
+                _logger.LogInformation("Including script: {@script}", x);
+
+                var path = x.Directory;
+                if (!Path.IsPathRooted(path))
+                {
+                    path = Path.Combine(_workspaceConfig.RootDirectory, path);
+                }
+
+                path = Path.GetFullPath(path);
+                if (!Directory.Exists(path))
+                {
+                    throw new Exception($"The script directory {x.Directory} doesn't exist.");
+                }
+
+                x.Directory = path;
+                
+                var scriptPath = $"{x.Directory}{Path.DirectorySeparatorChar}{x.Name}";
+                if (!File.Exists(scriptPath))
+                {
+                    throw new Exception($"The install script {x.Name} doesn't exist.");
+                }
+                
+                return x;
+            }).ToList();
+        }
+
+        private List<string> GetPreseeds(Image image)
+        {
+            return (image.Preseeds ?? new List<string>()).Select(x =>
+            {
+                _logger.LogInformation("Including preseed file: {file}", x);
+                var path = x;
+                if (!Path.IsPathRooted(path))
+                {
+                    path = Path.Combine(_workspaceConfig.RootDirectory, path);
+                }
+
+                path = Path.GetFullPath(path);
+                if (!File.Exists(path))
+                {
+                    throw new Exception($"The preseed file {x} doesn.t exist.");
+                }
+
+                return path;
+            }).ToList();
         }
     }
 }
