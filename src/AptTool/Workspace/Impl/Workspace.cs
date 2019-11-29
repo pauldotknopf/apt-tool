@@ -53,8 +53,7 @@ namespace AptTool.Workspace.Impl
         
         public void Init()
         {
-            var image = GetImage();
-            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory, image.Repositories);
+            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory, GetRepositories());
         }
 
         public Image GetImage()
@@ -275,7 +274,7 @@ namespace AptTool.Workspace.Impl
             _processRunner.RunShell("mkdir -p \"stage2/preseeds\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
 
             _logger.LogInformation("Including apt repositories...");
-            foreach (var repo in image.Repositories)
+            foreach (var repo in GetRepositories(image))
             {
                 _processRunner.RunShell($"echo {repo.ToString().Quoted()} | tee -a ./etc/apt/sources.list",
                     new RunnerOptions {UseSudo = !Env.IsRoot, WorkingDirectory = directory});
@@ -547,6 +546,23 @@ namespace AptTool.Workspace.Impl
                 }
 
                 return path;
+            }).ToList();
+        }
+
+        private List<AptRepo> GetRepositories(Image image = null)
+        {
+            if (image == null)
+            {
+                image = GetImage();
+            }
+            return image.Repositories.SelectMany(x =>
+            {
+                var result = new List<AptRepo> {x};
+                if (x.IncludeSourcePackages && !x.Source)
+                {
+                    result.Add(new AptRepo(x.Uri, x.Distribution, true, x.Components.ToArray()));
+                }
+                return result;
             }).ToList();
         }
     }
