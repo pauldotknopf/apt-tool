@@ -53,8 +53,7 @@ namespace AptTool.Workspace.Impl
         
         public void Init()
         {
-            var image = GetImage();
-            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory, image.Repositories);
+            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory, GetRepositories());
         }
 
         public Image GetImage()
@@ -275,7 +274,7 @@ namespace AptTool.Workspace.Impl
             _processRunner.RunShell("mkdir -p \"stage2/preseeds\"", new RunnerOptions { UseSudo = !Env.IsRoot, WorkingDirectory = directory });
 
             _logger.LogInformation("Including apt repositories...");
-            foreach (var repo in image.Repositories)
+            foreach (var repo in GetRepositories(image))
             {
                 _processRunner.RunShell($"echo {repo.ToString().Quoted()} | tee -a ./etc/apt/sources.list",
                     new RunnerOptions {UseSudo = !Env.IsRoot, WorkingDirectory = directory});
@@ -298,6 +297,7 @@ namespace AptTool.Workspace.Impl
             stage2Script.AppendLine("export LC_ALL=C");
             stage2Script.AppendLine("export LANGUAGE=C");
             stage2Script.AppendLine("export LANG=C");
+            stage2Script.AppendLine($"export APT_TOOL_ROOTFS_NATIVE_DIR={directory.Quoted()}");
             
             // Step 1, run all the preseeds.
             foreach (var preseedFile in preseedFiles)
@@ -333,11 +333,6 @@ namespace AptTool.Workspace.Impl
             // Step 4, within the stage2, now we configure all the packages that we have unpacked.
             stage2Script.AppendLine("dpkg --configure -a");
 
-            if (!runStage2) // Done put this message if we will be deleting this ourselves.
-            {
-                stage2Script.Append("echo \"DONE! Don't forget to delete /stage2!!\"");
-            }
-
             if (scripts.Count >= 0)
             {
                 _logger.LogInformation("Including the custom scripts in the stage2...");
@@ -357,6 +352,11 @@ namespace AptTool.Workspace.Impl
                             $"bash -c \"cd /stage2/scripts/{destinationScriptDirectoryName} && ./{script.Name}\"");
                     }
                 }
+            }
+            
+            if (!runStage2) // Done put this message if we will be deleting this ourselves.
+            {
+                stage2Script.AppendLine("echo \"DONE! Don't forget to delete /stage2!!\"");
             }
             
             _logger.LogInformation("Saving stage2 script to be run via chroot: {script}", "/stage2/stage2.sh");
@@ -442,11 +442,6 @@ namespace AptTool.Workspace.Impl
             runScript.AppendLine("export LANGUAGE=C");
             runScript.AppendLine("export LANG=C");
             
-            if (!runScripts) // Done put this message if we will be deleting this ourselves.
-            {
-                runScript.Append("echo \"DONE! Don't forget to delete /scripts!!\"");
-            }
-
             _logger.LogInformation("Including the custom scripts...");
 
             foreach (var scriptLookup in scripts.ToLookup(x => x.Directory))
@@ -461,6 +456,11 @@ namespace AptTool.Workspace.Impl
                     runScript.AppendLine(
                         $"bash -c \"cd /scripts/{destinationScriptDirectoryName} && ./{script.Name}\"");
                 }
+            }
+            
+            if (!runScripts) // Done put this message if we will be deleting this ourselves.
+            {
+                runScript.AppendLine("echo \"DONE! Don't forget to delete /scripts!!\"");
             }
             
             _logger.LogInformation("Saving script to be run via chroot: {script}", "/scripts/scripts.sh");
@@ -547,6 +547,23 @@ namespace AptTool.Workspace.Impl
                 }
 
                 return path;
+            }).ToList();
+        }
+
+        private List<AptRepo> GetRepositories(Image image = null)
+        {
+            if (image == null)
+            {
+                image = GetImage();
+            }
+            return image.Repositories.SelectMany(x =>
+            {
+                var result = new List<AptRepo> {x};
+                if (x.IncludeSourcePackages && !x.Source)
+                {
+                    result.Add(new AptRepo(x.Uri, x.Distribution, true, x.Components.ToArray()));
+                }
+                return result;
             }).ToList();
         }
     }

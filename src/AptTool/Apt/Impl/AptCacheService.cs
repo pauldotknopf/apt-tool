@@ -117,18 +117,6 @@ namespace AptTool.Apt.Impl
                         {
                             debPackageArchitecture = line.Substring("Architecture: ".Length);
                         }
-                        else if (line.StartsWith("Depends: "))
-                        {
-                            debPackageInfo.Dependencies = ParseDependencies(line.Substring("Depends: ".Length));
-                        }
-                        else if (line.StartsWith("Pre-Depends: "))
-                        {
-                            debPackageInfo.PreDependencies = ParseDependencies(line.Substring("Pre-Depends: ".Length));
-                        }
-                        else if (line.StartsWith("Provides: "))
-                        {
-                            debPackageInfo.Provides = ParseDependencies(line.Substring("Provides: ".Length));
-                        }
                         else
                         {
                             // Not supported...
@@ -227,44 +215,6 @@ namespace AptTool.Apt.Impl
 
                 action(current);
             }
-        }
-
-        private List<PackageDependency> ParseDependencies(string line)
-        {
-            var depends = line.Split(", ")
-                .Select(x =>
-                {
-                    var firstIndex = x.IndexOf("(", StringComparison.Ordinal);
-                    if (firstIndex != -1)
-                    {
-                        return x.Substring(0, firstIndex - 1);
-                    }
-
-                    return x;
-                })
-                .Select(x =>
-                {
-                    var firstIndex = x.IndexOf(":", StringComparison.Ordinal);
-                    if (firstIndex != -1)
-                    {
-                        return x.Substring(0, firstIndex);
-                    }
-
-                    return x;
-                })
-                .Select(x => x.Trim())
-                .Distinct()
-                .ToList();
-            return depends.Select(x =>
-            {
-                if (x.Contains("|"))
-                {
-                    return (PackageDependency)new PackageDependencyAlternates(ParseDependencies(x.Replace("|", ",")).Select(
-                        y => ((PackageDependencySpecific) y).Package).ToList());
-                }
-
-                return (PackageDependency)new PackageDependencySpecific(x);
-            }).ToList();
         }
     }
 }

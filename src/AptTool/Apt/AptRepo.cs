@@ -7,7 +7,7 @@ namespace AptTool.Apt
 {
     public class AptRepo
     {
-        public AptRepo(string uri, string distribution, params string[] components)
+        public AptRepo(string uri, string distribution, bool source, params string[] components)
         {
             Uri = uri;
             Distribution = distribution;
@@ -15,18 +15,21 @@ namespace AptTool.Apt
             {
                 throw new Exception("You must provide at least one component.");
             }
+            Source = source;
             Components = components.ToList();
         }
         
         public string Uri { get; set; }
         
         public string Distribution { get; set; }
+
+        public bool Source { get; set; }
         
         public List<string> Components { get; set; }
 
         public override string ToString()
         {
-            return $"deb {Uri} {Distribution} {string.Join(" ", Components)}";
+            return $"{(Source ? "deb-src" : "deb")} {Uri} {Distribution} {string.Join(" ", Components)}";
         }
     }
 }
