@@ -561,7 +561,7 @@ namespace AptTool.Workspace.Impl
                 var result = new List<AptRepo> {x};
                 if (x.IncludeSourcePackages && !x.Source)
                 {
-                    result.Add(new AptRepo(x.Uri, x.Distribution, true, x.Components.ToArray()));
+                    result.Add(new AptRepo(x.Trusted, x.Uri, x.Distribution, true, x.Components.ToArray()));
                 }
                 return result;
             }).ToList();
