@@ -7,17 +7,16 @@ namespace AptTool.Apt
 {
     public class AptRepo
     {
-        public AptRepo(string uri, string distribution, bool source, params string[] components)
+        public AptRepo(bool trusted, string uri, string distribution, bool source, params string[] components)
         {
+            Trusted = trusted;
             Uri = uri;
             Distribution = distribution;
-            if (components.Length == 0)
-            {
-                throw new Exception("You must provide at least one component.");
-            }
             Source = source;
-            Components = components.ToList();
+            Components = components != null ? components.ToList() : new List<string>();
         }
+        
+        public bool Trusted { get; set; }
         
         public string Uri { get; set; }
         
@@ -29,7 +28,14 @@ namespace AptTool.Apt
 
         public override string ToString()
         {
-            return $"{(Source ? "deb-src" : "deb")} {Uri} {Distribution} {string.Join(" ", Components)}";
+            var result = new StringBuilder();
+            result.Append(Source ? "deb-src " : "deb ");
+            if (Trusted)
+            {
+                result.Append("[trusted=yes] ");
+            }
+            result.Append($"{Uri} {Distribution} {string.Join(" ", Components)}".Trim());
+            return result.ToString();
         }
     }
 }
