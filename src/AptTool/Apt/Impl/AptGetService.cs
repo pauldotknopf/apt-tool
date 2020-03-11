@@ -94,7 +94,7 @@ namespace AptTool.Apt.Impl
 
             return result;
         }
-        
+
         private void Chunk(IEnumerable<string> input, Action<List<string>> action)
         {
             var all = input.ToList();

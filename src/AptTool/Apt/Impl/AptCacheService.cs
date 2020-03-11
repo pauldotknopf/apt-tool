@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using AptTool.Process;
 using BindingAttributes;
 
@@ -65,6 +66,8 @@ namespace AptTool.Apt.Impl
                 {
                     string debPackageVersion = null;
                     string debPackageArchitecture = null;
+                    string debPackageSource = null;
+                    string debPackageSourceVersion = null;
                     DebPackageInfo debPackageInfo = null;
                     string debPackageName = null;
                     
@@ -75,6 +78,17 @@ namespace AptTool.Apt.Impl
                         {
                             if (!string.IsNullOrEmpty(debPackageName))
                             {
+                                if (string.IsNullOrEmpty(debPackageSource))
+                                {
+                                    debPackageSource = debPackageName;
+                                }
+                                if (string.IsNullOrEmpty(debPackageSourceVersion))
+                                {
+                                    debPackageSourceVersion = debPackageVersion;
+                                }
+                                debPackageInfo.SourcePackage = debPackageSource;
+                                debPackageInfo.SourceVersion = debPackageSourceVersion;
+                                
                                 if (result.ContainsKey(debPackageName))
                                 {
                                     result[debPackageName].Add(new AptVersion(debPackageVersion, debPackageArchitecture), debPackageInfo);
@@ -91,6 +105,8 @@ namespace AptTool.Apt.Impl
                                 debPackageVersion = null;
                                 debPackageArchitecture = null;
                                 debPackageInfo = null;
+                                debPackageSource = null;
+                                debPackageSourceVersion = null;
                             }
                             line = streamReader.ReadLine();
                             continue;
@@ -117,6 +133,17 @@ namespace AptTool.Apt.Impl
                         {
                             debPackageArchitecture = line.Substring("Architecture: ".Length);
                         }
+                        else if (line.StartsWith("Source: "))
+                        {
+                            line = line.Substring("Source: ".Length);
+                            var parsed = Regex.Match(line, @"^([a-zA-Z0-9.+-]+)(?:\s+\(([a-zA-Z0-9.+:~-]+)\))?$");
+                            if (!parsed.Success)
+                            {
+                                throw new Exception($"Invalid source line: {line}");
+                            }
+                            debPackageSource = parsed.Groups[1].Value;
+                            debPackageSourceVersion = parsed.Groups[2].Value;
+                        }
                         else
                         {
                             // Not supported...
@@ -127,6 +154,17 @@ namespace AptTool.Apt.Impl
 
                     if (!string.IsNullOrEmpty(debPackageName))
                     {
+                        if (string.IsNullOrEmpty(debPackageSource))
+                        {
+                            debPackageSource = debPackageName;
+                        }
+                        if (string.IsNullOrEmpty(debPackageSourceVersion))
+                        {
+                            debPackageSourceVersion = debPackageVersion;
+                        }
+                        debPackageInfo.SourcePackage = debPackageSource;
+                        debPackageInfo.SourceVersion = debPackageSourceVersion;
+                        
                         if (result.ContainsKey(debPackageName))
                         {
                             result[debPackageName].Add(new AptVersion(debPackageVersion, debPackageArchitecture),

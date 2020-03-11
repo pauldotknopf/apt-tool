@@ -63,6 +63,7 @@ namespace AptTool.Apt.Impl
                 // Use the local gpg keys.
                 writer.WriteLine("Dir::Etc::Trusted \"/etc/apt/trusted.gpg\";");
                 writer.WriteLine("Dir::Etc::TrustedParts \"/etc/apt/trusted.gpg.d\";");
+                writer.WriteLine("Acquire::Check-Valid-Until \"false\";");
             }
 
             _aptConfigFile = aptConfig;

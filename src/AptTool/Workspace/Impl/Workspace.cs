@@ -6,11 +6,13 @@ using System.Linq;
 using System.Text;
 using AptTool.Apt;
 using AptTool.Process;
+using AptTool.Process.Impl;
 using BindingAttributes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
+using Serilog;
 
 namespace AptTool.Workspace.Impl
 {
@@ -88,7 +90,7 @@ namespace AptTool.Workspace.Impl
         public void Install()
         {
             _logger.LogInformation("Updating the package cache...");
-            _aptGetService.Update();
+            //_aptGetService.Update();
             
             var image = GetImage();
   
@@ -99,7 +101,7 @@ namespace AptTool.Workspace.Impl
             var policies = _aptCacheService.Policy(packageNames);
             var packageInfos = _aptCacheService.Show(packageNames.ToDictionary(x => x,
                     x => new AptVersion(policies[x].CandidateVersion, null)));
-            
+
             var packages = new Dictionary<string, AptVersion>();
             foreach (var packageName in packageNames)
             {
@@ -174,12 +176,21 @@ namespace AptTool.Workspace.Impl
             }
             
             _logger.LogInformation("Calculating all the packages that need to be installed...");
-            var packagesToInstall = _aptGetService.SimulateInstall(packages);
+            var packagesToInstall = _aptGetService.SimulateInstall(packages)
+                .ToDictionary(x => x.Key, x => new ImageLock.PackageEntry
+                {
+                    Version = x.Value,
+                    Source = new ImageLock.PackageSource
+                    {
+                        Name = packageInfos[x.Key][x.Value].SourcePackage,
+                        Version = packageInfos[x.Key][x.Value].SourceVersion
+                    }
+                });
             
             _logger.LogInformation("Resolved packages:");
             foreach (var packageToInstall in packagesToInstall)
             {
-                _logger.LogInformation($"\t{packageToInstall.Value.ToCommandParameter(packageToInstall.Key)}");
+                _logger.LogInformation($"\t{packageToInstall.Value.Version.ToCommandParameter(packageToInstall.Key)}");
             }
             
             _logger.LogInformation("Saving image-lock.json...");
@@ -284,7 +295,7 @@ namespace AptTool.Workspace.Impl
             _logger.LogInformation("Downloading the debs...");
             var debFolder = Path.Combine(_workspaceConfig.RootDirectory, ".debs");
             debFolder.EnsureDirectoryExists();
-            _aptGetService.Download(imageLock.InstalledPackages, debFolder);
+            _aptGetService.Download(imageLock.InstalledPackages.ToDictionary(x => x.Key, x => x.Value.Version), debFolder);
 
             // Debs will go in here to reinstall in stage 2.
             var stage2DebDirectory = Path.Combine(directory, "stage2", "debs");
@@ -310,13 +321,13 @@ namespace AptTool.Workspace.Impl
             foreach (var package in imageLock.InstalledPackages.Keys)
             {
                 var installedPackage = imageLock.InstalledPackages[package];
-                var debFile = Path.Combine(debFolder, $"{package}_{installedPackage.Version.Replace(":", "%3a")}_{installedPackage.Architecture}.deb");
+                var debFile = Path.Combine(debFolder, $"{package}_{installedPackage.Version.Version.Replace(":", "%3a")}_{installedPackage.Version.Architecture}.deb");
                 if (!File.Exists(debFile))
                 {
                     throw new Exception($"The deb file {debFile} doesn't exist.");
                 }
                 
-                _logger.LogInformation("Extracting: {package}", imageLock.InstalledPackages[package].ToCommandParameter(package));
+                _logger.LogInformation("Extracting: {package}", imageLock.InstalledPackages[package].Version.ToCommandParameter(package));
                 
                 // Step 2, we extract the entire contents of the of the deb package.
                 // This won't actually configure the package as installed, but it
@@ -380,110 +391,6 @@ namespace AptTool.Workspace.Impl
                 _logger.LogInformation("Running stage2...");
                 _processRunner.RunShell($"arch-chroot {directory.Quoted()} /stage2/stage2.sh", new RunnerOptions{ UseSudo = !Env.IsRoot });
                 _processRunner.RunShell($"rm -r {Path.Combine(directory, "stage2").Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
-            }
-            
-            _logger.LogInformation("Done!");
-        }
-
-        public void GenerateScripts(string directory, bool runScripts)
-        {
-            if (!Env.IsRoot)
-            {
-                _logger.LogWarning("The currently running user is not root. Some commands will be run with sudo.");
-            }
-
-            if (runScripts)
-            {
-                // Let's make sure arch-chroot is available.
-                if (!File.Exists("/usr/bin/arch-chroot"))
-                {
-                    _logger.LogError($"You indicated you wanted to run scripts, but arch-chroot isn't available. Try running {"sudo apt-get install arch-install-scripts".Quoted()}.");
-                    throw new Exception("The command arch-chroot isn't available.");
-                }
-            }
-
-            var image = GetImage();
-            var scripts = GetScripts(image);
-
-            if (scripts.Count == 0)
-            {
-                throw new Exception("There are no scripts to install and run.");
-            }
-            
-            if (string.IsNullOrEmpty(directory))
-            {
-                directory = "rootfs";
-            }
-
-            if (!Path.IsPathRooted(directory))
-            {
-                directory = Path.Combine(Directory.GetCurrentDirectory(), directory);
-            }
-
-            directory = Path.GetFullPath(directory);
-
-            var scriptsDirectory = Path.Combine(directory, "scripts");
-            
-            _logger.LogInformation("Installing scripts to {scripts}.", scriptsDirectory);
-        
-            if (Directory.Exists(scriptsDirectory))
-            {
-                _logger.LogInformation("Directory exists, removing...");
-                _processRunner.RunShell($"rm -rf {scriptsDirectory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
-            }
-            _processRunner.RunShell($"mkdir -p {scriptsDirectory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
-            
-            var runScript = new StringBuilder();
-            runScript.AppendLine("#!/bin/sh");
-            runScript.AppendLine("set -e");
-            runScript.AppendLine("export DEBIAN_FRONTEND=noninteractive");
-            runScript.AppendLine("export DEBCONF_NONINTERACTIVE_SEEN=true ");
-            runScript.AppendLine("export LC_ALL=C");
-            runScript.AppendLine("export LANGUAGE=C");
-            runScript.AppendLine("export LANG=C");
-            
-            _logger.LogInformation("Including the custom scripts...");
-
-            foreach (var scriptLookup in scripts.ToLookup(x => x.Directory))
-            {
-                var destinationScriptDirectoryName = $"{Path.GetFileName(scriptLookup.Key)}-{Guid.NewGuid().ToString().Replace("-", "")}";
-                var destinationScriptDirectory = Path.Combine(scriptsDirectory, destinationScriptDirectoryName);
-                _processRunner.RunShell($"mkdir {destinationScriptDirectory}", new RunnerOptions{ UseSudo = !Env.IsRoot });
-                _processRunner.RunShell($"cp -ra {scriptLookup.Key}/* {destinationScriptDirectory}/", new RunnerOptions{ UseSudo = !Env.IsRoot });
-
-                foreach (var script in scriptLookup)
-                {
-                    runScript.AppendLine(
-                        $"bash -c \"cd /scripts/{destinationScriptDirectoryName} && ./{script.Name}\"");
-                }
-            }
-            
-            if (!runScripts) // Done put this message if we will be deleting this ourselves.
-            {
-                runScript.AppendLine("echo \"DONE! Don't forget to delete /scripts!!\"");
-            }
-            
-            _logger.LogInformation("Saving script to be run via chroot: {script}", "/scripts/scripts.sh");
-            
-            var scriptPath = Path.Combine(scriptsDirectory, "scripts.sh");
-            var tempPath = Path.GetTempFileName();
-            try
-            {
-                File.WriteAllText(tempPath, runScript.ToString());
-                _processRunner.RunShell($"cp \"{tempPath}\" \"{scriptPath}\"", new RunnerOptions{ UseSudo = !Env.IsRoot });
-            }
-            finally
-            {
-                File.Delete(tempPath);
-            }
-            
-            _processRunner.RunShell($"chmod +x {scriptPath}", new RunnerOptions{ UseSudo = !Env.IsRoot });
-
-            if (runScripts)
-            {
-                _logger.LogInformation("Running scripts...");
-                _processRunner.RunShell($"arch-chroot {directory.Quoted()} /scripts/scripts.sh", new RunnerOptions{ UseSudo = !Env.IsRoot });
-                _processRunner.RunShell($"rm -r {scriptsDirectory.Quoted()}", new RunnerOptions{ UseSudo = !Env.IsRoot });
             }
             
             _logger.LogInformation("Done!");
@@ -565,6 +472,119 @@ namespace AptTool.Workspace.Impl
                 }
                 return result;
             }).ToList();
+        }
+
+        public class ChangelogEntry
+        {
+            public string SourcePackage { get; set; }
+            
+            public string MD5 { get; set; }
+        }
+        
+        public void  SyncChangelogs()
+        {
+            var imageLock = GetImageLock();
+            
+            _logger.LogInformation("Updating the package cache...");
+            _aptGetService.Update();
+            
+            // Download the packages.
+            _logger.LogInformation("Downloading the debs...");
+            var debFolder = Path.Combine(_workspaceConfig.RootDirectory, ".debs");
+            debFolder.EnsureDirectoryExists();
+            _aptGetService.Download(imageLock.InstalledPackages.ToDictionary(x => x.Key, x => x.Value.Version), debFolder);
+            
+            var tmpChangelogDirectory = Path.Combine(_workspaceConfig.RootDirectory, ".tmp-changelog");
+            tmpChangelogDirectory.CleanOrCreateDirectory();
+            
+            var tmpExtractionDirectory = Path.Combine(tmpChangelogDirectory, "tmp");
+            Directory.CreateDirectory(tmpExtractionDirectory);
+            
+            foreach (var package in imageLock.InstalledPackages.Keys)
+            {
+                var installedPackage = imageLock.InstalledPackages[package];
+                var debFile = Path.Combine(debFolder, $"{package}_{installedPackage.Version.Version.Replace(":", "%3a")}_{installedPackage.Version.Architecture}.deb");
+                if (!File.Exists(debFile))
+                {
+                    throw new Exception($"The deb file {debFile} doesn't exist.");
+                }
+                
+                _logger.LogInformation("Extracting: {package}", imageLock.InstalledPackages[package].Version.ToCommandParameter(package));
+                
+                _dpkgService.Extract(debFile, tmpExtractionDirectory, false);
+            }
+            
+            _logger.LogInformation("Finding changelogs...");
+            var docsDirectory = Path.Combine(tmpExtractionDirectory, "usr", "share", "doc");
+            var changelogEntries = new List<ChangelogEntry>();
+            foreach (var packageDirectoryPath in Directory.GetDirectories(docsDirectory))
+            {
+                var packageDirectoryName = Path.GetFileName(packageDirectoryPath);
+                
+                _logger.LogInformation("Finding changelog for {package}...", packageDirectoryName);
+                
+                string FindChangelog(string baseName)
+                {
+                    var debianName = baseName + ".Debian";
+                    if (File.Exists(debianName))
+                    {
+                        return debianName;
+                    }
+                    debianName += ".gz";
+                    if (File.Exists(debianName))
+                    {
+                        return debianName;
+                    }
+                    if (File.Exists(baseName))
+                    {
+                        return baseName;
+                    }
+                    baseName += ".gz";
+                    if (File.Exists(baseName))
+                    {
+                        return baseName;
+                    }
+                    return null;
+                }
+                
+                var changelogPath = FindChangelog(Path.Combine(packageDirectoryPath, "changelog"));
+                if (string.IsNullOrEmpty(changelogPath))
+                {
+                    _logger.LogWarning("Couldn't find changelog in {package} doc directory.", packageDirectoryName);
+                    continue;
+                }
+
+                var changelogEntry = new ChangelogEntry();
+                changelogEntry.MD5 = _processRunner.ReadShell($"md5sum {changelogPath.Quoted()}");
+                changelogEntry.MD5 = changelogEntry.MD5.Substring(0, changelogEntry.MD5.IndexOf(" ", StringComparison.Ordinal));
+                changelogEntry.SourcePackage = _processRunner.ReadShell($"dpkg-parsechangelog -S Source -l {changelogPath.Quoted()}").TrimEnd(Environment.NewLine.ToCharArray());
+
+                var existing = changelogEntries.SingleOrDefault(x =>
+                    x.MD5 == changelogEntry.MD5 && x.SourcePackage == changelogEntry.SourcePackage);
+                if (existing != null)
+                {
+                    _logger.LogWarning("Changelog already exists for {packge} via {sourcePackage}", packageDirectoryName, changelogEntry.SourcePackage);
+                    continue;
+                }
+                
+                var destination = Path.Combine(tmpChangelogDirectory, changelogEntry.SourcePackage);
+                _processRunner.RunShell($"dpkg-parsechangelog -S Changes --all -l {changelogPath.Quoted()} > {destination.Quoted()}");
+                
+                _logger.LogInformation("Saved changelog for {package}.", packageDirectoryName);
+            }
+
+            if (Directory.Exists(tmpExtractionDirectory))
+            {
+                Directory.Delete(tmpExtractionDirectory, true);
+            }
+            var changelogDirectory = Path.Combine(_workspaceConfig.RootDirectory, "changelogs");
+            if (Directory.Exists(changelogDirectory))
+            {
+                Directory.Delete(changelogDirectory, true);
+            }
+            Directory.Move(tmpChangelogDirectory, changelogDirectory);
+            
+            _logger.LogInformation("Done!");
         }
     }
 }
