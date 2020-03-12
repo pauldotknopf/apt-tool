@@ -7,12 +7,13 @@ using System.Text;
 using AptTool.Apt;
 using AptTool.Process;
 using AptTool.Process.Impl;
+using AptTool.Security;
 using BindingAttributes;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using Serilog;
+using ServiceStack;
 
 namespace AptTool.Workspace.Impl
 {
@@ -36,8 +37,7 @@ namespace AptTool.Workspace.Impl
             DefaultValueHandling = DefaultValueHandling.Ignore
         };
 
-        public Workspace(IAptDirectoryPrepService aptDirectoryPrepService,
-            IOptions<WorkspaceConfig> workspaceConfig,
+        public Workspace(IAptDirectoryPrepService aptDirectoryPrepService, Microsoft.Extensions.Options.IOptions<WorkspaceConfig> workspaceConfig,
             IAptCacheService aptCacheService,
             ILogger<Workspace> logger,
             IAptGetService aptGetService,
@@ -90,7 +90,7 @@ namespace AptTool.Workspace.Impl
         public void Install()
         {
             _logger.LogInformation("Updating the package cache...");
-            //_aptGetService.Update();
+            _aptGetService.Update();
             
             var image = GetImage();
   
@@ -585,6 +585,161 @@ namespace AptTool.Workspace.Impl
             Directory.Move(tmpChangelogDirectory, changelogDirectory);
             
             _logger.LogInformation("Done!");
+        }
+
+        public void SaveAuditReport(string suite, string database)
+        {
+            bool VersionLessThan(string version1, string version2)
+            {
+                try
+                {
+                    _processRunner.RunShell($"dpkg --compare-versions \"{version1}\" \"lt\" \"{version2}\"", new RunnerOptions
+                    {
+                        LogCommandOnError = false
+                    });
+                    return true;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            }
+            
+            // Make sure dpkg --compare-versions works
+            if (!VersionLessThan("1", "2") || VersionLessThan("2", "1"))
+            {
+                throw new Exception("dpkg --compare-versions appears to not be working.");
+            }
+            
+            var packageName = "ansible";
+            
+            var securityDb = new SecurityDb(database);
+
+            var imageLock = GetImageLock();
+
+            var auditReport = new AuditReport();
+            
+            foreach (var package in imageLock.InstalledPackages)
+            {
+                var sourcePackage = package.Value.Source;
+                if (sourcePackage == null || sourcePackage.Name.IsNullOrEmpty() ||
+                    sourcePackage.Version.IsNullOrEmpty())
+                {
+                    continue;
+                }
+
+                // Here is a description of how these issues are associated with versions/releases.
+                // 1. If a package note has no release, it means that package note applies to all versions.
+                // 2. If that package note has a fixed version of "0", it means that it isn't affected.
+                // 3. If the package note has a fixed version of null, it means that it is affected (or hasn't been determined yet).
+                // Then, if there is a package note for a specific release, it overrides 1-3 on a per-suite level.
+                var bugNames = securityDb.GetPackageNotesForPackage(sourcePackage.Name).Select(x => x.BugName).Distinct().ToList();
+
+                foreach (var bugName in bugNames)
+                {
+                    var packageNote = securityDb.GetPackageNoteForBugInSuite(sourcePackage.Name, bugName, suite);
+                    if (packageNote == null)
+                    {
+                        packageNote = securityDb.GetPackageNoteForBugInAllSuites(sourcePackage.Name, bugName);
+                    }
+
+                    if (packageNote == null)
+                    {
+                        continue;
+                    }
+                    
+                    if (packageNote.FixedVersion == "0")
+                    {
+                        // Explicitly marked as "not affected!"
+                        continue;
+                    }
+
+                    void TrackBug()
+                    {
+                        var auditSourcePackage = auditReport.Sources.SingleOrDefault(x =>
+                            x.Name == sourcePackage.Name && x.Version == sourcePackage.Version);
+                        if (auditSourcePackage == null)
+                        {
+                            auditSourcePackage = new AuditReport.AuditSourcePackage
+                            {
+                                Name = sourcePackage.Name,
+                                Version = sourcePackage.Version
+                            };
+                            auditReport.Sources.Add(auditSourcePackage);
+                        }
+                        auditSourcePackage.Binaries[package.Key] = package.Value.Version;
+
+                        if (auditSourcePackage.Vulnerabilities.Any(x => x.Name == bugName))
+                        {
+                            return;
+                        }
+                        
+                        var bug = securityDb.GetBug(packageNote.BugName);
+                        var nvdData = securityDb.GetNvdData(bug.Name);
+
+                        var vulnerability = new AuditReport.Vulnerability
+                        {
+                            Name = packageNote.BugName,
+                            Description = bug.Description
+                        };
+
+                        if (nvdData != null)
+                        {
+                            vulnerability.Description = nvdData.CveDescription;
+                            vulnerability.Severity = nvdData.Severity;
+                        }
+
+                        if (vulnerability.Name.StartsWith("DSA") || vulnerability.Name.StartsWith("DLA"))
+                        {
+                            var references = securityDb.GetReferences(bug.Name);
+                            if (references.Count > 0)
+                            {
+                                vulnerability.References = references;
+                            }
+                        }
+
+                        vulnerability.FixedVersion = packageNote.FixedVersion;
+                        if (string.IsNullOrEmpty(vulnerability.FixedVersion))
+                        {
+                            vulnerability.FixedVersion = "NONE";
+                        }
+
+                        var noDsa = securityDb.GetNoDsaInfoForPackage(sourcePackage.Name, bugName, suite);
+                        if (noDsa != null)
+                        {
+                            vulnerability.NoDsa = new AuditReport.NoDsa
+                            {
+                                Comment = string.IsNullOrEmpty(noDsa.Comment) ? null : noDsa.Comment,
+                                Reason = string.IsNullOrEmpty(noDsa.Reason) ? null : noDsa.Reason
+                            };
+                        }
+                        
+                        auditSourcePackage.Vulnerabilities.Add(vulnerability);
+                    }
+
+                    if (string.IsNullOrEmpty(packageNote.FixedVersion))
+                    {
+                        // Marked as affected, with no fixed version.
+                        TrackBug();
+                    }
+                    else
+                    {
+                        // Has a fixed version.
+                        if (VersionLessThan(package.Value.Version.Version, packageNote.FixedVersion))
+                        {
+                            // And we don't have it!
+                            TrackBug();
+                        }
+                    }
+                }
+            }
+
+            var file = Path.Combine(_workspaceConfig.RootDirectory, "debian-audit.json");
+            if (File.Exists(file))
+            {
+                File.Delete(file);
+            }
+            File.WriteAllText(file, JsonConvert.SerializeObject(auditReport, _jsonSerializerSettings));
         }
     }
 }
