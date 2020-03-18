@@ -58,7 +58,10 @@ namespace AptTool.Process.Impl
 
             if (process.ExitCode != 0)
             {
-                _logger.LogError("Error executing command: {command}", command);
+                if (runnerOptions.LogCommandOnError)
+                {
+                    _logger.LogError("Error executing command: {command}", command);
+                }
                 throw new Exception($"Exit code: {process.ExitCode}");
             }
         }

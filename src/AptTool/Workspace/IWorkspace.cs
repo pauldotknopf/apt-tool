@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using AptTool.Apt;
+using AptTool.Security;
 
 namespace AptTool.Workspace
 {
@@ -14,7 +15,9 @@ namespace AptTool.Workspace
         void Install();
 
         void GenerateRootFs(string directory, bool overwrite, bool runStage2);
-        
-        void GenerateScripts(string directory, bool runScripts);
+
+        void SyncChangelogs();
+
+        void SaveAuditReport(string suite, string database);
     }
 }

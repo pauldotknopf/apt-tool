@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using AptTool.Process;
+using AptTool.Process.Impl;
 using BindingAttributes;
 using CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Mono.Unix.Native;
 using Serilog;
 using Serilog.Events;
 
@@ -21,15 +24,20 @@ namespace AptTool
  
         static int Main(string[] args)
         {
+            // Bug starting gzip within process, see this: https://blog.nelhage.com/2010/02/a-very-subtle-bug/
+            Stdlib.SetSignalAction(Signum.SIGPIPE, SignalAction.Default);
+            
             return Parser.Default.ParseArguments<Commands.Install.Command,
                     Commands.GenerateRootFs.Command,
-                    Commands.GenerateScripts.Command,
-                    Commands.Man.Command>(args)
+                    Commands.Man.Command,
+                    Commands.DownloadChangelogs.Command,
+                    Commands.DebianSecurityAudit.Command>(args)
                 .MapResult(
                     (Commands.Install.Command opts) => Commands.Install.Run(opts),
                     (Commands.GenerateRootFs.Command opts) => Commands.GenerateRootFs.Run(opts),
-                    (Commands.GenerateScripts.Command opts) => Commands.GenerateScripts.Run(opts),
                     (Commands.Man.Command opts) => Commands.Man.Run(opts),
+                    (Commands.DownloadChangelogs.Command opts) => Commands.DownloadChangelogs.Run(opts),
+                    (Commands.DebianSecurityAudit.Command opts) => Commands.DebianSecurityAudit.Run(opts),
                     errs => 1);
         }
 
