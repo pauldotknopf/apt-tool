@@ -464,6 +464,7 @@ namespace AptTool.Workspace.Impl
             {
                 image = GetImage();
             }
+
             return image.Repositories.SelectMany(x =>
             {
                 var result = new List<AptRepo> {x};
@@ -471,7 +472,33 @@ namespace AptTool.Workspace.Impl
                 {
                     result.Add(new AptRepo(x.Trusted, x.Uri, x.Distribution, true, x.Components.ToArray()));
                 }
+
                 return result;
+            }).Select(x =>
+            {
+                // Let's detect if we have a relative path to a local repo.
+                // if we detect "file:../somewhere", we need to resolve that path, relative to
+                // the images.json files.
+                if (x.Uri.StartsWith("file:"))
+                {
+                    var path = x.Uri.Substring("file:".Length);
+                    if (Path.IsPathRooted(path))
+                    {
+                        // Absolute paths don't need to be changed.
+                        return x;
+                    }
+
+                    var absolutePath = _processRunner.ReadShell($"readlink -f {path}", new RunnerOptions
+                    {
+                        WorkingDirectory = _workspaceConfig.RootDirectory
+                    }).TrimEnd(Environment.NewLine.ToArray());
+                    if (string.IsNullOrEmpty(absolutePath))
+                    {
+                        throw new Exception($"Unknown file path for apt repo: {path}");
+                    }
+                    return new AptRepo(x.Trusted, $"file:{absolutePath}", x.Distribution, x.Source, x.Components.ToArray());
+                }
+                return x;
             }).ToList();
         }
 
@@ -615,7 +642,7 @@ namespace AptTool.Workspace.Impl
             var packageName = "ansible";
             
             var securityDb = new SecurityDb(database);
-
+            
             var imageLock = GetImageLock();
 
             var auditReport = new AuditReport();
