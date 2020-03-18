@@ -35,6 +35,8 @@ namespace AptTool.Security
             
             public string Description { get; set; }
             
+            public string NvdSeverity { get; set; }
+            
             public string Severity { get; set; }
             
             public string Link { get; set; }

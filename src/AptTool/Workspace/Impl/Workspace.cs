@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using AptTool.Apt;
 using AptTool.Process;
 using AptTool.Process.Impl;
@@ -680,13 +681,14 @@ namespace AptTool.Workspace.Impl
                         var vulnerability = new AuditReport.Vulnerability
                         {
                             Name = packageNote.BugName,
-                            Description = bug.Description
+                            Description = bug.Description,
+                            Severity = packageNote.Urgency
                         };
 
                         if (nvdData != null)
                         {
                             vulnerability.Description = nvdData.CveDescription;
-                            vulnerability.Severity = nvdData.Severity;
+                            vulnerability.NvdSeverity = nvdData.Severity;
                         }
 
                         if (vulnerability.Name.StartsWith("DSA") || vulnerability.Name.StartsWith("DLA"))
@@ -712,6 +714,26 @@ namespace AptTool.Workspace.Impl
                                 Comment = string.IsNullOrEmpty(noDsa.Comment) ? null : noDsa.Comment,
                                 Reason = string.IsNullOrEmpty(noDsa.Reason) ? null : noDsa.Reason
                             };
+                        }
+
+                        var bugNotes = securityDb.GetBugNotes(bug.Name);
+
+                        var notes = new List<string>();
+                        var packageRegex = new Regex(@"^(?:\[([a-z]+)\]\s)?-\s([A-Za-z0-9:.+-]+)\s+<([a-z-]+)>\s*(?:\s\((.*)\))?$", RegexOptions.Compiled);
+                        foreach (var bugNote in bugNotes)
+                        {
+                            var match = packageRegex.Match(bugNote.Comment);
+                            if (match.Success)
+                            {
+                                continue;
+                            }
+                            
+                            notes.Add(bugNote.Comment);
+                        }
+
+                        if (notes.Count > 0)
+                        {
+                            vulnerability.Notes = notes;
                         }
                         
                         auditSourcePackage.Vulnerabilities.Add(vulnerability);

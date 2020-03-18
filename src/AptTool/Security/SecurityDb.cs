@@ -89,6 +89,15 @@ namespace AptTool.Security
                 return connection.Single(query);
             }
         }
+        
+        public List<Bug> GetAllBugs()
+        {
+            using (var connection = _dbConnectionFactory.OpenDbConnection())
+            {
+                var query = connection.From<Bug>();
+                return connection.Select(query);
+            }
+        }
 
         public NvdData GetNvdData(string cveName)
         {
