@@ -95,38 +95,11 @@ namespace AptTool.Workspace.Impl
             
             var image = GetImage();
   
-            _logger.LogInformation("Getting all package names...");
-            var packageNames = _aptCacheService.Packages();
-
             _logger.LogInformation("Looking for all the essential/required/important packages...");
-            var policies = _aptCacheService.Policy(packageNames);
-            var packageInfos = _aptCacheService.Show(packageNames.ToDictionary(x => x,
-                    x => new AptVersion(policies[x].CandidateVersion, null)));
-
             var packages = new Dictionary<string, AptVersion>();
-            foreach (var packageName in packageNames)
+            foreach (var importantPackage in _aptCacheService.ImportantAndEssentialPackages())
             {
-                var policy = policies[packageName];
-                var packageInfo = packageInfos[packageName].Single(x => x.Key.Version == policy.CandidateVersion).Value;
-
-                if (string.IsNullOrEmpty(packageInfo.Priority) && !string.IsNullOrEmpty(packageInfo.Essential) && packageInfo.Essential == "yes")
-                {
-                    packages.Add(packageName, new AptVersion(null, null));
-                    continue;
-                }
-
-                if (packageInfo.Priority == "required")
-                {
-                    _logger.LogInformation("Adding required package: {package}", packageName);
-                    packages.Add(packageName, AptVersion.Unspecified);
-                } else if (packageInfo.Priority == "important")
-                {
-                    if (!image.ExcludeImportant)
-                    {
-                        _logger.LogInformation("Adding important package: {package}", packageName);
-                        packages.Add(packageName, AptVersion.Unspecified);
-                    }
-                }
+                packages[importantPackage] = AptVersion.Unspecified;
             }
 
             if (image.Packages != null)
@@ -162,7 +135,7 @@ namespace AptTool.Workspace.Impl
                     }
                 }
             }
-            
+
             _logger.LogInformation("Declared packages:");
             foreach (var package in packages)
             {
@@ -177,8 +150,10 @@ namespace AptTool.Workspace.Impl
             }
             
             _logger.LogInformation("Calculating all the packages that need to be installed...");
-            var packagesToInstall = _aptGetService.SimulateInstall(packages)
-                .ToDictionary(x => x.Key, x => new ImageLock.PackageEntry
+            var packagesToInstall = _aptGetService.SimulateInstall(packages);
+            var packageInfos = _aptCacheService.Show(packagesToInstall);
+            
+            var packageEntries = packagesToInstall.ToDictionary(x => x.Key, x => new ImageLock.PackageEntry
                 {
                     Version = x.Value,
                     Source = new ImageLock.PackageSource
@@ -189,7 +164,7 @@ namespace AptTool.Workspace.Impl
                 });
             
             _logger.LogInformation("Resolved packages:");
-            foreach (var packageToInstall in packagesToInstall)
+            foreach (var packageToInstall in packageEntries)
             {
                 _logger.LogInformation($"\t{packageToInstall.Value.Version.ToCommandParameter(packageToInstall.Key)}");
             }
@@ -202,7 +177,7 @@ namespace AptTool.Workspace.Impl
             }
             File.WriteAllText(lockFile, JsonConvert.SerializeObject(new ImageLock
             {
-                InstalledPackages = packagesToInstall
+                InstalledPackages = packageEntries
             }, _jsonSerializerSettings));
             
             _logger.LogInformation("Done!");
@@ -638,8 +613,6 @@ namespace AptTool.Workspace.Impl
             {
                 throw new Exception("dpkg --compare-versions appears to not be working.");
             }
-            
-            var packageName = "ansible";
             
             var securityDb = new SecurityDb(database);
             

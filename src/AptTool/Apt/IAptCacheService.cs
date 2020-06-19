@@ -8,6 +8,6 @@ namespace AptTool.Apt
 
         Dictionary<string, Dictionary<AptVersion, DebPackageInfo>> Show(Dictionary<string, AptVersion> packages);
         
-        Dictionary<string, PolicyInfo> Policy(List<string> packages);
+        List<string> ImportantAndEssentialPackages();
     }
 }

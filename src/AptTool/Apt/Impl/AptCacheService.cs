@@ -184,61 +184,53 @@ namespace AptTool.Apt.Impl
             return result;
         }
         
-        public Dictionary<string, PolicyInfo> Policy(List<string> packages)
+        public List<string> ImportantAndEssentialPackages()
         {
-            if (packages.Count == 0)
+            var result = new List<string>();
+            
+            // TODO: Only get package lists for architecture we care about.
+            // Only needs to be done when we support cross-arch building of rootfs (not needed).
+            foreach(var repoPackageCache in Directory.GetFiles(Path.Combine(_aptDirectoryPrepService.AptDirectory, "var", "lib", "apt", "lists"), "*binary-*_Packages"))
             {
-                throw new Exception("You must provide at least one package.");
-            }
-
-            var result = new Dictionary<string, PolicyInfo>();
-            Chunk(packages, (chunk) =>
-            {
-                var output = _processRunner.ReadShell($"apt-cache policy {string.Join(" ", chunk)}", new RunnerOptions
+                using (var file = File.OpenRead(repoPackageCache))
+                using(var reader = new StreamReader(file))
                 {
-                    Env =  new Dictionary<string, string>
+                    string packageName = null;
+                    while (!reader.EndOfStream)
                     {
-                        { "APT_CONFIG", _aptDirectoryPrepService.AptConfigFile },
-                        { "DEBIAN_FRONTEND", "noninteractive" },
-                        { "DEBCONF_NONINTERACTIVE_SEEN", "true" },
-                        { "LC_ALL", "C" },
-                        { "LANGUAGE", "C" },
-                        { "LANG", "C" }
-                    }
-                });
-
-                using (var streamReader = new StringReader(output))
-                {
-                    KeyValuePair<string, PolicyInfo>? policy = null;
-                    
-                    var line = streamReader.ReadLine();
-                    while (line != null)
-                    {
-                        if (!line.StartsWith(" "))
+                        var line = reader.ReadLine();
+                        if (string.IsNullOrEmpty(line))
                         {
-                            if (policy.HasValue)
+                            continue;
+                        }
+
+                        if (line.StartsWith("Package: "))
+                        {
+                            packageName = line.Substring("Package: ".Length).Trim();
+                            continue;
+                        }
+
+                        if (line.StartsWith("Priority: "))
+                        {
+                            if (line.Substring("Priority: ".Length).Trim() == "important")
                             {
-                                result.Add(policy.Value.Key, policy.Value.Value);
-                                policy = null;
+                                result.Add(packageName);
                             }
-                            policy = new KeyValuePair<string, PolicyInfo>(line.Trim().TrimEnd(':'), new PolicyInfo());
+                            continue;
                         }
-                        else if (line.StartsWith("  Candidate:"))
-                        {
-                            policy.Value.Value.CandidateVersion = line.Substring("  Candidate:".Length).Trim();
-                        }
-                        
-                        line = streamReader.ReadLine();
-                    }
 
-                    if (policy.HasValue)
-                    {
-                        result.Add(policy.Value.Key, policy.Value.Value);
+                        if (line.StartsWith("Essential: "))
+                        {
+                            if (line.Substring("Essential: ".Length).Trim() == "yes")
+                            {
+                                result.Add(packageName);
+                            }
+                        }
                     }
                 }
-            });
+            }
 
-            return result;
+            return result.Distinct().ToList();
         }
 
         private void Chunk(IEnumerable<string> input, Action<List<string>> action)
