@@ -19,7 +19,7 @@ namespace AptTool.Apt.Impl
             _logger = logger;
         }
         
-        public void Prep(string workspaceRoot, List<AptRepo> repositories)
+        public void Prep(string workspaceRoot, List<AptRepo> repositories, bool excludeRecommends)
         {
             if (repositories == null || repositories.Count == 0)
             {
@@ -64,6 +64,7 @@ namespace AptTool.Apt.Impl
                 writer.WriteLine("Dir::Etc::Trusted \"/etc/apt/trusted.gpg\";");
                 writer.WriteLine("Dir::Etc::TrustedParts \"/etc/apt/trusted.gpg.d\";");
                 writer.WriteLine("Acquire::Check-Valid-Until \"false\";");
+                writer.WriteLine($"APT::Install-Recommends \"{(!excludeRecommends).ToString().ToLower()}\";");
             }
 
             _aptConfigFile = aptConfig;

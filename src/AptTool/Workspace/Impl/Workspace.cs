@@ -56,7 +56,8 @@ namespace AptTool.Workspace.Impl
         
         public void Init()
         {
-            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory, GetRepositories());
+            var image = GetImage();
+            _aptDirectoryPrepService.Prep(_workspaceConfig.RootDirectory,  GetRepositories(), image.ExcludeRecommends);
         }
 
         public Image GetImage()

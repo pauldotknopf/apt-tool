@@ -7,6 +7,8 @@ namespace AptTool.Workspace
     {
         public bool ExcludeImportant { get; set; }
         
+        public bool ExcludeRecommends { get; set; }
+        
         public List<ImageAptRepo> Repositories { get; set; }
         
         public Dictionary<string, string> Packages { get; set; }
