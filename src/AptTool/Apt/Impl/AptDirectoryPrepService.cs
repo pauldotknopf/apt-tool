@@ -65,6 +65,8 @@ namespace AptTool.Apt.Impl
                 writer.WriteLine("Dir::Etc::TrustedParts \"/etc/apt/trusted.gpg.d\";");
                 writer.WriteLine("Acquire::Check-Valid-Until \"false\";");
                 writer.WriteLine($"APT::Install-Recommends \"{(!excludeRecommends).ToString().ToLower()}\";");
+                // Don't download translations.
+                writer.WriteLine("Acquire::Languages \"none\";");
             }
 
             _aptConfigFile = aptConfig;
